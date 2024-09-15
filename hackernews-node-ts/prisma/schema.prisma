@@ -23,3 +23,22 @@ model Comment {
   link      Link?    @relation(fields: [linkId], references: [id])
   linkId    Int?
 }
+
+model Track {
+  id        Int      @id @default(autoincrement())
+  createdAt DateTime @default(now())
+  title     String
+  thumbnail String
+  length    Int
+  modulesCount Int
+  author    Author   @relation(fields: [authorId], references: [id])
+  authorId  Int
+  }
+
+model Author {
+  id        Int      @id @default(autoincrement())
+  name      String
+  photo String
+  Track Track[]
+  @@unique([id])
+}

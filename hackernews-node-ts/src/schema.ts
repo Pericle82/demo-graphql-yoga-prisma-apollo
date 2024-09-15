@@ -1,9 +1,24 @@
 import { createSchema } from 'graphql-yoga'
-import { Prisma, type Link } from '@prisma/client'
+import { Prisma, Track, type Link } from '@prisma/client'
 import type { GraphQLContext } from './context'
 import { GraphQLError } from 'graphql'
-  
+
 const typeDefinitions = /* GraphQL */ `
+type Track {
+  id: ID!
+  title: String!
+  thumbnail: String
+  length: Int
+  modulesCount: Int
+  author: Author 
+}
+
+type Author {
+  id: ID!
+  name: String!
+  photo: String
+}
+
 type Link {
   id: ID!
   description: String!
@@ -18,8 +33,11 @@ type Comment {
  
 type Query {
   info: String!
-  feed(filterNeedle: String): [Link!]!
+  feed(filterNeedle: String, skip: Int, take: Int): [Link!]!
   comment(id: ID!): Comment
+  getTrack(id: ID!): Track
+  getTracks: [Track]
+  getAuthors: [Author]
 }
  
 type Mutation {
@@ -35,15 +53,68 @@ const parseIntSafe = (value: string): number | null => {
   return null
 }
 
+const applyTakeConstraints = (params: { min: number; max: number; value: number }) => {
+  if (params.value < params.min || params.value > params.max) {
+    throw new GraphQLError(
+      `'take' argument value '${params.value}' is outside the valid range of '${params.min}' to '${params.max}'.`
+    )
+  }
+  return params.value
+}
+
 const resolvers = {
   Query: {
     info: () => `This is the API of a Hackernews Clone`,
-    feed: (parent: unknown, args: {filterNeedle?: string}, context: GraphQLContext) => context.prisma.link.findMany(),
+    feed: (
+      parent: unknown,
+      args: { filterNeedle?: string, skip?: number, take?: number, },
+      context: GraphQLContext) => {
+      const where = args.filterNeedle ? {
+        OR: [
+          { description: { contains: args.filterNeedle } },
+          { url: { contains: args.filterNeedle } }
+        ]
+      } : {}
+      const take = applyTakeConstraints({
+        min: 1,
+        max: 50,
+        value: args.take ?? 30
+      })
+
+      return context.prisma.link.findMany({
+        where,
+        skip: args.skip,
+        take
+      })
+    },
     async comment(parent: unknown, args: { id: string }, context: GraphQLContext) {
       return context.prisma.comment.findUnique({
         where: { id: parseInt(args.id) }
       })
-    }  
+    },
+    async getTrack(parent: unknown, args: { id: string }, context: GraphQLContext) {
+      return context.prisma.track.findUnique({
+        where: { id: parseInt(args.id) }
+      })
+    },
+    async getTracks(parent: unknown, args: {}, context: GraphQLContext) {
+      return context.prisma.track.findMany()
+    },
+    async getAuthors(parent: unknown, args: {}, context: GraphQLContext) {
+      return context.prisma.author.findMany()
+    }
+  },
+  Track: {
+    id: (parent: Track) => parent.id,
+    title: (parent: Track) => parent.title,
+    thumbnail: (parent: Track) => parent.thumbnail,
+    length: (parent: Track) => parent.length,
+    modulesCount: (parent: Track) => parent.modulesCount,
+    author(parent: Track, args: {}, context: GraphQLContext) {
+      return context.prisma.author.findUnique({
+        where: { id: parent.authorId }
+      })
+    }
   },
   Link: {
     id: (parent: Link) => parent.id,
@@ -95,12 +166,12 @@ const resolvers = {
         }
         return Promise.reject(err)
       })
- 
+
       return newComment
     }
   }
 }
- 
+
 export const schema = createSchema({
   resolvers: [resolvers],
   typeDefs: [typeDefinitions]
